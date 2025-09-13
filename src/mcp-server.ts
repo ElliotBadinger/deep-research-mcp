@@ -31,6 +31,76 @@ const server = new McpServer({
   version: '1.0.0',
 }, { capabilities: { logging: {} } });
 
+// Backward compatibility: traditional report generation
+server.tool(
+  'deep-research',
+  'Generate AI-summarized research report (legacy mode - consider using research-sources for better context preservation)',
+  {
+    query: z.string().min(1).describe("The research query to investigate"),
+    depth: z.number().min(1).max(5).describe("How deep to go in the research tree (1-5)"),
+    breadth: z.number().min(1).max(5).describe("How broad to make each research level (1-5)"),
+    model: z.string().optional().describe('Model specifier (use list-models tool to see options)'),
+    tokenBudget: z.number().optional().describe('Optional soft cap for total research-phase tokens'),
+    sourcePreferences: z.string().optional().describe('Natural-language preferences for sources to avoid'),
+  },
+  async ({ query, depth, breadth, model: modelSpec, tokenBudget, sourcePreferences }, { sendNotification }) => {
+    try {
+      let currentProgress = '';
+      const model = getModel(modelSpec);
+      log(`Using model for legacy report: ${modelSpec || 'auto (best available)'}`);
+
+      const result = await deepResearch({
+        query, depth, breadth, model, tokenBudget, sourcePreferences,
+        onProgress: async progress => {
+          const progressMsg = `Depth ${progress.currentDepth}/${progress.totalDepth}, Query ${progress.completedQueries}/${progress.totalQueries}: ${progress.currentQuery || ''}`;
+          if (progressMsg !== currentProgress) {
+            currentProgress = progressMsg;
+            log(progressMsg);
+            try {
+              await sendNotification({
+                method: 'notifications/message',
+                params: { level: 'info', data: progressMsg },
+              });
+            } catch (error) {
+              log('Error sending progress notification:', error);
+            }
+          }
+        },
+      });
+
+      const report = await writeFinalReport({
+        prompt: query,
+        learnings: result.learnings,
+        visitedUrls: result.visitedUrls,
+        sourceMetadata: result.sourceMetadata,
+        model
+      });
+
+      return {
+        content: [{ type: 'text', text: report }],
+        metadata: {
+          learnings: result.learnings,
+          visitedUrls: result.visitedUrls,
+          stats: {
+            totalLearnings: result.learnings.length,
+            totalSources: result.visitedUrls.length,
+            averageReliability: result.weightedLearnings.reduce((acc, curr) => acc + curr.reliability, 0) / result.weightedLearnings.length
+          },
+        },
+      };
+    } catch (error) {
+      log('Error in legacy deep research:', error instanceof Error ? error.message : String(error));
+      return {
+        content: [{
+          type: 'text',
+          text: `Error performing research: ${error instanceof Error ? error.message : String(error)}`,
+        }],
+        isError: true,
+      };
+    }
+  },
+);
+
 // List available models tool
 server.tool(
   'list-models',
@@ -75,8 +145,8 @@ server.tool(
 
 // Define the deep research tool
 server.tool(
-  'deep-research',
-  'Perform deep research on a topic using AI-powered web search',
+  'research-sources',
+  'Collect comprehensive raw research data on a topic - returns structured source data for LLM synthesis with full user context',
   {
     query: z.string().min(1).describe("The research query to investigate"),
     depth: z.number().min(1).max(5).describe("How deep to go in the research tree (1-5)"),
@@ -119,30 +189,46 @@ server.tool(
         },
       });
 
-      const report = await writeFinalReport({
-        prompt: query,
-        learnings: result.learnings,
-        visitedUrls: result.visitedUrls,
-        sourceMetadata: result.sourceMetadata,
-        model
-      });
+      // Return raw research data for LLM synthesis with full user context
+      const researchData = {
+        research_session: {
+          query,
+          parameters: { depth, breadth, tokenBudget, sourcePreferences },
+          model_used: modelSpec || 'auto',
+          execution_time: new Date().toISOString(),
+          total_sources: result.visitedUrls.length
+        },
+        raw_sources: result.sourceMetadata.map((source, index) => ({
+          id: `src_${String(index + 1).padStart(3, '0')}`,
+          url: source.url,
+          title: source.title,
+          content: null, // Content not stored in SourceMetadata, would need to be fetched separately
+          metadata: {
+            word_count: 0, // Would need separate content fetch to calculate
+            domain: source.domain,
+            content_type: 'unknown'
+          },
+          reliability_assessment: {
+            score: source.reliabilityScore,
+            reasoning: source.reliabilityReasoning
+          }
+        })),
+        research_coverage: {
+          total_sources: result.visitedUrls.length,
+          average_reliability: result.weightedLearnings.reduce((acc, curr) => acc + curr.reliability, 0) / result.weightedLearnings.length,
+          high_reliability_sources: result.sourceMetadata.filter(s => s.reliabilityScore >= 0.7).length,
+          visited_urls: result.visitedUrls
+        }
+      };
 
       return {
         content: [
           {
             type: 'text',
-            text: report,
+            text: `Research completed: Found ${result.visitedUrls.length} sources with average reliability ${(researchData.research_coverage.average_reliability * 100).toFixed(1)}%\n\nRaw research data provided below for synthesis with your full conversation context.`,
           },
         ],
-        metadata: {
-          learnings: result.learnings,
-          visitedUrls: result.visitedUrls,
-          stats: {
-            totalLearnings: result.learnings.length,
-            totalSources: result.visitedUrls.length,
-            averageReliability: result.weightedLearnings.reduce((acc, curr) => acc + curr.reliability, 0) / result.weightedLearnings.length
-          },
-        },
+        metadata: researchData,
       };
     } catch (error) {
       log(
