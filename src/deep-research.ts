@@ -1,6 +1,6 @@
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
-import FirecrawlApp, { SearchResponse } from '@mendable/firecrawl-js';
+import { SearchResponse } from '@mendable/firecrawl-js';
 import { generateObject } from 'ai';
 import { config } from 'dotenv';
 import { compact } from 'lodash-es';
@@ -12,6 +12,10 @@ import type { LanguageModelV2 } from '@ai-sdk/provider';
 import { firecrawl as firecrawlConfig } from './config.js';
 import { OutputManager } from './output-manager.js';
 import { systemPrompt } from './prompt.js';
+import { Result, Ok, Err, isOk } from './shared/Result.js';
+import { AIModelError } from './shared/errors.js';
+import { logger } from './infrastructure/logging/Logger.js';
+import { FirecrawlClient } from './infrastructure/search/FirecrawlClient.js';
 
 // Get the directory name of the current module
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -22,9 +26,9 @@ config({ path: resolve(__dirname, '../.env.local') });
 // Initialize output manager for coordinated console/progress output
 const output = new OutputManager();
 
-// Replace console.log with output.log
-function log(...args: any[]) {
-  output.log(...args);
+// Replace console.log with structured logging
+function log(message: string, context?: any) {
+  logger.info(message, context);
 }
 
 export type ResearchProgress = {
@@ -54,11 +58,8 @@ type SourceMetadata = {
 // Configurable concurrency limit
 const ConcurrencyLimit = firecrawlConfig.concurrency;
 
-// Initialize Firecrawl with config
-const firecrawl = new FirecrawlApp({
-  apiKey: firecrawlConfig.apiKey,
-  apiUrl: firecrawlConfig.baseUrl,
-});
+// Initialize Firecrawl client with fallback logic
+const firecrawl = new FirecrawlClient();
 
 type LearningWithReliability = {
   content: string;
@@ -199,15 +200,20 @@ Prefer authoritative, primary, and technical sources; avoid queries that are lik
   // Log more detailed information about query generation
   const verificationQueries = validatedQueries.filter(q => q.isVerificationQuery);
   if (verificationQueries.length > 0) {
-    log(`Generated ${verificationQueries.length} verification queries to check information from less reliable sources`);
+    logger.info('Generated verification queries', {
+      operation: 'query_generation',
+      verificationCount: verificationQueries.length
+    });
   }
 
   // Log which research directions are being addressed
   const queriesWithDirections = validatedQueries.filter(q => q.relatedDirection !== null);
   if (queriesWithDirections.length > 0) {
-    log(`Queries addressing research directions:\n${queriesWithDirections
-      .map(q => `- "${q.query}" addresses: ${q.relatedDirection}`)
-      .join('\n')}`);
+    logger.info('Queries addressing research directions', {
+      operation: 'query_generation',
+      directionCount: queriesWithDirections.length,
+      directions: queriesWithDirections.map(q => ({ query: q.query, direction: q.relatedDirection }))
+    });
   }
 
   return validatedQueries;
@@ -225,25 +231,26 @@ async function evaluateSourceReliability({
   sourcePreferences?: string;
   model: LanguageModelV2;
   budget?: BudgetState;
-}): Promise<{ score: number; reasoning: string; use: boolean; preferenceReason?: string; domain: string }> {
-  const url = item.url || '';
-  const title = item.title || '';
-  let domain = '';
+}): Promise<Result<{ score: number; reasoning: string; use: boolean; preferenceReason?: string; domain: string }, AIModelError>> {
   try {
-    domain = url ? new URL(url).hostname : '';
-  } catch {
-    domain = '';
-  }
-  const contentSnippet = trimPrompt(item.markdown || '', 4000);
+    const url = item.url || '';
+    const title = item.title || '';
+    let domain = '';
+    try {
+      domain = url ? new URL(url).hostname : '';
+    } catch {
+      domain = '';
+    }
+    const contentSnippet = trimPrompt(item.markdown || '', 4000);
 
-  const prefBlock = sourcePreferences && sourcePreferences.trim().length > 0
-    ? `User preferences to avoid (apply holistically, not via keywords):\n<preferences>${sourcePreferences}</preferences>\n\nAlso return whether this source should be USED given these preferences.`
-    : 'No special user preferences provided.';
+    const prefBlock = sourcePreferences && sourcePreferences.trim().length > 0
+      ? `User preferences to avoid (apply holistically, not via keywords):\n<preferences>${sourcePreferences}</preferences>\n\nAlso return whether this source should be USED given these preferences.`
+      : 'No special user preferences provided.';
 
-  const res = await generateObject({
-    model,
-    system: systemPrompt(),
-    prompt: `Evaluate the reliability and suitability of this source for the research query. Provide a reliability score and a brief reasoning. If user preferences are provided, judge suitability holistically against them.
+    const res = await generateObject({
+      model,
+      system: systemPrompt(),
+      prompt: `Evaluate the reliability and suitability of this source for the research query. Provide a reliability score and a brief reasoning. If user preferences are provided, judge suitability holistically against them.
 
 ${prefBlock}
 
@@ -252,17 +259,26 @@ Research query:\n<query>${query}</query>
 Source:\n- URL: ${url}\n- Domain: ${domain}\n- Title: ${title}\n- Content (truncated):\n"""\n${contentSnippet}\n"""
 
 Return JSON: { "score": number (0..1), "reasoning": string, "use": boolean, "preferenceReason"?: string }`,
-    schema: z.object({
-      score: z.number(),
-      reasoning: z.string(),
-      use: z.boolean(),
-      preferenceReason: z.string().optional(),
-    }),
-  });
+      schema: z.object({
+        score: z.number(),
+        reasoning: z.string(),
+        use: z.boolean(),
+        preferenceReason: z.string().optional(),
+      }),
+    });
 
-  recordUsage(budget, (res as any)?.usage);
+    recordUsage(budget, (res as any)?.usage);
 
-  return { score: res.object.score, reasoning: res.object.reasoning, use: res.object.use, preferenceReason: res.object.preferenceReason, domain };
+    return Ok({
+      score: res.object.score,
+      reasoning: res.object.reasoning,
+      use: res.object.use,
+      preferenceReason: res.object.preferenceReason,
+      domain
+    });
+  } catch (error) {
+    return Err(new AIModelError('Failed to evaluate source reliability', error as Error));
+  }
 }
 
 async function processSerpResult({
@@ -297,11 +313,12 @@ async function processSerpResult({
   const evaluations = await Promise.all(
     compact(result.data).map(async item => {
       if (!item.url) return null;
-      try {
-        const ev = await evaluateSourceReliability({ item, query, sourcePreferences, model, budget });
+      const evResult = await evaluateSourceReliability({ item, query, sourcePreferences, model, budget });
+      if (evResult.success) {
+        const ev = evResult.data;
         if (ev.use === false) return { excluded: true, item } as const;
         return { excluded: false, item, ev } as const;
-      } catch {
+      } else {
         // On error, keep the item to avoid over-filtering
         return { excluded: false, item } as const;
       }
@@ -344,7 +361,14 @@ async function processSerpResult({
     .filter(item => item.metadata.reliabilityScore >= reliabilityThreshold)
     .map(item => item.content);
 
-  log(`Ran ${query}, found ${contents.length} contents (${sourceMetadata.filter(m => m.reliabilityScore >= reliabilityThreshold).length} above reliability threshold ${reliabilityThreshold}${excludedCount > 0 ? `; ${excludedCount} excluded by preferences in reliability stage` : ''})`);
+  logger.info('SERP processing completed', {
+    operation: 'serp_processing',
+    query,
+    totalContents: contents.length,
+    aboveThreshold: sourceMetadata.filter(m => m.reliabilityScore >= reliabilityThreshold).length,
+    reliabilityThreshold,
+    excludedCount
+  });
 
   if (contents.length === 0) {
     return {
@@ -482,7 +506,11 @@ Here are all the learnings from previous research:
     .join('\n\n');
 
   const reportEnd = Date.now();
-  log(`[TIMING] Final report generation took ${reportEnd - reportStart}ms`);
+  logger.info('Final report generated', {
+    operation: 'report_generation',
+    duration: reportEnd - reportStart,
+    sourceCount: sourceMetadata.length
+  });
   return res.object.reportMarkdown + sourcesSection;
 }
 
@@ -584,7 +612,11 @@ export async function deepResearch({
             },
           });
           const searchEnd = Date.now();
-          log(`[TIMING] Firecrawl search for "${serpQuery.query}" took ${searchEnd - searchStart}ms`);
+          logger.info('Firecrawl search completed', {
+            operation: 'firecrawl_search',
+            query: serpQuery.query,
+            duration: searchEnd - searchStart
+          });
 
           // Collect URLs from this search
           const newUrls = compact(result.data.map(item => item.url));
@@ -603,7 +635,12 @@ export async function deepResearch({
             budget,
           });
           const processEnd = Date.now();
-          log(`[TIMING] Processing SERP for "${serpQuery.query}" took ${processEnd - processStart}ms`);
+          logger.info('SERP processing completed', {
+            operation: 'serp_processing',
+            query: serpQuery.query,
+            duration: processEnd - processStart,
+            learningsCount: processedResult.learnings.length
+          });
           
           const allLearnings = [...learnings, ...processedResult.learnings];
           const allUrls = [...visitedUrls, ...newUrls];
@@ -629,9 +666,12 @@ export async function deepResearch({
           }
 
           if (newDepth > 0) {
-            log(
-              `Researching deeper, breadth: ${newBreadth}, depth: ${newDepth}`,
-            );
+            logger.info('Researching deeper', {
+              operation: 'deep_research',
+              breadth: newBreadth,
+              depth: newDepth,
+              query: serpQuery.query
+            });
 
             reportProgress({
               currentDepth: newDepth,
@@ -683,10 +723,22 @@ Follow-up research directions: ${processedResult.followUpQuestions.map(q => `\n$
             };
           }
         } catch (e: any) {
-          if (e.message && e.message.includes('Timeout')) {
-            log(`Timeout error running query: ${serpQuery.query}: `, e);
+          const errorMsg = e.message || String(e);
+          if (errorMsg.includes('Timeout')) {
+            logger.error('Query timeout error', e as Error, {
+              operation: 'query_execution',
+              query: serpQuery.query
+            });
+          } else if (errorMsg.includes('ECONNREFUSED') || errorMsg.includes('connect') || errorMsg.includes('credits')) {
+            logger.error('Firecrawl connection/credits error', e as Error, {
+              operation: 'firecrawl_search',
+              query: serpQuery.query
+            });
           } else {
-            log(`Error running query: ${serpQuery.query}: `, e);
+            logger.error('Query execution error', e as Error, {
+              operation: 'query_execution',
+              query: serpQuery.query
+            });
           }
           return {
             learnings: [],
@@ -710,6 +762,11 @@ Follow-up research directions: ${processedResult.followUpQuestions.map(q => `\n$
   };
 
   const researchEnd = Date.now();
-  log(`[TIMING] Overall deepResearch took ${researchEnd - researchStart}ms`);
+  logger.info('Deep research completed', {
+    operation: 'deep_research',
+    duration: researchEnd - researchStart,
+    totalLearnings: combinedResults.learnings.length,
+    totalUrls: combinedResults.visitedUrls.length
+  });
   return combinedResults;
 }

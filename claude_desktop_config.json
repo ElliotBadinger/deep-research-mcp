@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "deep-research": {
+      "command": "node",
+      "args": ["/home/siya/deep-research-mcp/dist/mcp-server.js"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}

@@ -1,10 +1,28 @@
+version: '3.8'
+
 services:
-  deep-research:
-    container_name: deep-research
-    build: .
-    env_file:
-      - .env.local
-    volumes:
-      -  ./:/app/
-    tty: true
-    stdin_open: true
+  firecrawl:
+    image: mendableai/firecrawl:latest
+    ports:
+      - "3002:3002"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - PLAYWRIGHT_MICROSERVICE_URL=http://playwright-service:3000
+    depends_on:
+      - redis
+      - playwright-service
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  playwright-service:
+    image: browserless/chrome:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - MAX_CONCURRENT_SESSIONS=10
+    restart: unless-stopped

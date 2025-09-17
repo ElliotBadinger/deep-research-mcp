@@ -1,0 +1,19 @@
+{"level":30,"time":1757871363365,"pid":72090,"hostname":"Siya-epistemophile","operation":"direct_test","msg":"Direct test log"}
+{"level":30,"time":1757872016637,"pid":84911,"hostname":"Siya-epistemophile","operation":"server_startup","hasOpenAiKey":false,"hasGoogleKey":true,"hasAnthropicKey":false,"hasXaiKey":false,"hasFirecrawlKey":false,"firecrawlBaseUrl":"http://localhost:3002","firecrawlConcurrency":2,"msg":"MCP Server environment check"}
+{"level":30,"time":1757872016637,"pid":84911,"hostname":"Siya-epistemophile","operation":"server_startup","timestamp":"2025-09-14T17:46:56.637Z","version":"1.0.0","msg":"MCP Server initialized successfully"}
+{"level":30,"time":1757872016650,"pid":84911,"hostname":"Siya-epistemophile","operation":"server_startup","transport":"stdio","attempt":1,"msg":"MCP Server connected"}
+{"level":30,"time":1757872016656,"pid":84911,"hostname":"Siya-epistemophile","operation":"firecrawl_startup","msg":"Starting local Firecrawl with docker-compose"}
+{"level":40,"time":1757872016662,"pid":84911,"hostname":"Siya-epistemophile","operation":"firecrawl_startup","msg":"Could not start local Firecrawl: Command failed: docker-compose up -d firecrawl\n/bin/sh: 1: docker-compose: not found\n"}
+{"level":40,"time":1757872016662,"pid":84911,"hostname":"Siya-epistemophile","operation":"server_startup","msg":"Local Firecrawl unavailable, will use cloud fallback"}
+{"level":30,"time":1757872054954,"pid":85605,"hostname":"Siya-epistemophile","operation":"server_startup","hasOpenAiKey":false,"hasGoogleKey":true,"hasAnthropicKey":false,"hasXaiKey":false,"hasFirecrawlKey":false,"firecrawlBaseUrl":"http://localhost:3002","firecrawlConcurrency":2,"msg":"MCP Server environment check"}
+{"level":30,"time":1757872054959,"pid":85605,"hostname":"Siya-epistemophile","operation":"server_startup","timestamp":"2025-09-14T17:47:34.954Z","version":"1.0.0","msg":"MCP Server initialized successfully"}
+{"level":30,"time":1757872054987,"pid":85605,"hostname":"Siya-epistemophile","operation":"server_startup","transport":"stdio","attempt":1,"msg":"MCP Server connected"}
+{"level":30,"time":1757872054999,"pid":85605,"hostname":"Siya-epistemophile","operation":"firecrawl_startup","msg":"Starting local Firecrawl with docker-compose"}
+{"level":40,"time":1757872055005,"pid":85605,"hostname":"Siya-epistemophile","operation":"firecrawl_startup","msg":"Could not start local Firecrawl: Command failed: docker-compose up -d firecrawl\n/bin/sh: 1: docker-compose: not found\n"}
+{"level":40,"time":1757872055005,"pid":85605,"hostname":"Siya-epistemophile","operation":"server_startup","msg":"Local Firecrawl unavailable, will use cloud fallback"}
+{"level":30,"time":1757872204043,"pid":88380,"hostname":"Siya-epistemophile","operation":"server_startup","hasOpenAiKey":false,"hasGoogleKey":true,"hasAnthropicKey":false,"hasXaiKey":false,"hasFirecrawlKey":false,"firecrawlBaseUrl":"http://localhost:3002","firecrawlConcurrency":2,"msg":"MCP Server environment check"}
+{"level":30,"time":1757872204044,"pid":88380,"hostname":"Siya-epistemophile","operation":"server_startup","timestamp":"2025-09-14T17:50:04.043Z","version":"1.0.0","msg":"MCP Server initialized successfully"}
+{"level":30,"time":1757872204064,"pid":88380,"hostname":"Siya-epistemophile","operation":"server_startup","transport":"stdio","attempt":1,"msg":"MCP Server connected"}
+{"level":30,"time":1757872204080,"pid":88380,"hostname":"Siya-epistemophile","operation":"firecrawl_startup","msg":"Starting local Firecrawl with docker-compose"}
+{"level":40,"time":1757872204088,"pid":88380,"hostname":"Siya-epistemophile","operation":"firecrawl_startup","msg":"Could not start local Firecrawl: Command failed: docker-compose up -d firecrawl\n/bin/sh: 1: docker-compose: not found\n"}
+{"level":40,"time":1757872204088,"pid":88380,"hostname":"Siya-epistemophile","operation":"server_startup","msg":"Local Firecrawl unavailable, will use cloud fallback"}

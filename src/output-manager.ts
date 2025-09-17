@@ -1,4 +1,5 @@
 import { ResearchProgress } from './deep-research.js';
+import { logger } from './infrastructure/logging/Logger.js';
 
 export class OutputManager {
   private progressLines: number = 4;
@@ -20,8 +21,9 @@ export class OutputManager {
       // Clear progress area
       process.stderr.write('\x1B[0J');
     }
-    // Print log message to stderr
-    console.error(...args);
+    // Print log message using structured logging
+    const message = args.map(arg => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' ');
+    logger.info(message, { operation: 'output_manager' });
     // Redraw progress area if initialized
     if (this.initialized) {
       this.drawProgress();
